@@ -1,7 +1,7 @@
 const cds = require('@sap/cds')
 const http = require('node:http')
 const https = require('node:https')
-const { getDestination } = require('@sap-cloud-sdk/connectivity')
+const { buildHeadersForDestination, getDestination } = require('@sap-cloud-sdk/connectivity')
 
 const LOG = cds.log('mcp')
 
@@ -18,8 +18,9 @@ const HOP_BY_HOP = new Set([
 ])
 
 // Request headers we deliberately do NOT forward to the backend.
-// The user's IAS bearer is replaced by principal propagation (the Cloud
-// Connector mints a per-user X.509), so we strip Authorization.
+// The user's IAS bearer must never be forwarded to the backend. It is replaced
+// below by the authentication configured on the resolved BTP destination
+// (Basic, principal propagation, OAuth, etc.).
 const DROP_REQUEST_HEADERS = new Set([
   'authorization',
   'host',
@@ -124,6 +125,19 @@ async function proxyToBackend(req, res) {
     return sendError(res, 502, 'destination_error', err.message)
   }
 
+  let destinationHeaders
+  try {
+    destinationHeaders = await buildHeadersForDestination(destination)
+  } catch (err) {
+    LOG.error('destination authentication failed', {
+      correlationId: cid,
+      destination: destinationName,
+      authentication: destination.authentication,
+      error: err.message,
+    })
+    return sendError(res, 502, 'destination_authentication_error', err.message)
+  }
+
   // Build the absolute backend target URL. Anything after the /mcp mount point
   // is appended, and the destination's sap-client is added as a query param.
   const subPath = req.url && req.url !== '/' ? req.url : ''
@@ -141,6 +155,7 @@ async function proxyToBackend(req, res) {
 
   const headers = {
     ...filterRequestHeaders(req.headers),
+    ...destinationHeaders,
     host: target.host,
     'x-correlation-id': cid,
     ...(isOnPremise ? proxyHeaders(proxy) : {}),
@@ -192,6 +207,7 @@ async function proxyToBackend(req, res) {
     mcpMethod,
     user: req.principal?.email,
     destination: destinationName,
+    authentication: destination.authentication,
     proxyType: destination.proxyType,
     target: `${target.origin}${target.pathname}`,
     locationId: headers[LOC_HEADER],

@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict')
 const test = require('node:test')
+const { buildHeadersForDestination } = require('@sap-cloud-sdk/connectivity')
 const { buildTargetUrl, resolveLocationId } = require('../srv/lib/proxy')
 
 test('joins a root backend path without producing a double slash', () => {
@@ -19,6 +20,19 @@ test('joins backend and request paths with one separator', () => {
   const target = buildTargetUrl('https://backend.example/', '/sap/opu/odata/', '/MY_SERVICE/$metadata')
 
   assert.equal(target.toString(), 'https://backend.example/sap/opu/odata/MY_SERVICE/$metadata')
+})
+
+test('builds the authorization header configured by a Basic destination', async () => {
+  const headers = await buildHeadersForDestination({
+    authentication: 'BasicAuthentication',
+    username: 'backend-user',
+    password: 'backend-password',
+  })
+
+  assert.equal(
+    headers.authorization,
+    `Basic ${Buffer.from('backend-user:backend-password').toString('base64')}`,
+  )
 })
 
 // Regression: a route that explicitly opts out of an SCC location id (empty
