@@ -137,7 +137,9 @@ function describeRoutes() {
       locationId: r.locationId != null ? r.locationId : (mcp.locationId != null ? mcp.locationId : null),
       methods: r.methods || 'all',
       peek: r.peek,
+      requireAuth: r.requireAuth != null ? isEnabled(r.requireAuth, true) : isGlobalAuthRequired(),
     })),
+    auth: { requireAuth: isGlobalAuthRequired() },
   }
 }
 
@@ -152,7 +154,15 @@ function normalizeRoute(raw, mcp) {
     methods = raw.methods.map((m) => String(m).toLowerCase())
   }
 
-  return {
+  // Per-route auth: `requireAuth: false` / `auth: false` / `allowAnonymous: true` / `skipAuth: true`
+  // all mean the route is anonymous. Undefined inherits the global `cds.mcp.requireAuth`.
+  let requireAuth
+  if (raw.requireAuth != null) requireAuth = isEnabled(raw.requireAuth, true)
+  else if (raw.auth != null) requireAuth = isEnabled(raw.auth, true)
+  else if (raw.allowAnonymous != null) requireAuth = !isEnabled(raw.allowAnonymous, false)
+  else if (raw.skipAuth != null) requireAuth = !isEnabled(raw.skipAuth, false)
+
+  const route = {
     path,
     destination: raw.destination || mcp.destination,
     backendPath: raw.backendPath != null ? raw.backendPath : (mcp.backendPath || ''),
@@ -161,6 +171,8 @@ function normalizeRoute(raw, mcp) {
     peek: raw.peek === true,
     methods,
   }
+  if (requireAuth !== undefined) route.requireAuth = requireAuth
+  return route
 }
 
 /**
@@ -175,6 +187,34 @@ function isEnabled(value, fallback = true) {
   const s = String(value).trim().toLowerCase()
   if (s === '') return fallback
   return !['false', '0', 'no', 'off'].includes(s)
+}
+
+/**
+ * Whether inbound IAS authentication is required globally.
+ * Env overrides: `CDS_MCP_REQUIRE_AUTH=false` / `CDS_MCP_REQUIREAUTH=false`
+ * or `CDS_MCP_ALLOW_ANONYMOUS=true` / `CDS_MCP_SKIP_AUTH=true` all disable auth.
+ * Default: true (backward compatible).
+ * String values are coerced via `isEnabled` so "false"/"0"/"no"/"off" work.
+ */
+function isGlobalAuthRequired() {
+  const mcp = cds.env.mcp || {}
+  if (mcp.requireAuth != null) return isEnabled(mcp.requireAuth, true)
+  if (mcp.require_auth != null) return isEnabled(mcp.require_auth, true)
+  if (mcp.allowAnonymous != null) return !isEnabled(mcp.allowAnonymous, false)
+  if (mcp.allow_anonymous != null) return !isEnabled(mcp.allow_anonymous, false)
+  if (mcp.skipAuth != null) return !isEnabled(mcp.skipAuth, false)
+  if (mcp.skip_auth != null) return !isEnabled(mcp.skip_auth, false)
+  return true
+}
+
+/**
+ * Whether a specific route requires authentication.
+ * `route.requireAuth === false` (or `auth: false` / `allowAnonymous: true`) wins
+ * over the global flag; otherwise inherits `isGlobalAuthRequired()`.
+ */
+function isRouteAuthRequired(route) {
+  if (route && route.requireAuth != null) return isEnabled(route.requireAuth, true)
+  return isGlobalAuthRequired()
 }
 
 /**
@@ -196,4 +236,4 @@ function getEndpoints() {
   }
 }
 
-module.exports = { normalizeRoute, resolveRoutes, describeRoutes, getEndpoints }
+module.exports = { normalizeRoute, resolveRoutes, describeRoutes, getEndpoints, isEnabled, isGlobalAuthRequired, isRouteAuthRequired }

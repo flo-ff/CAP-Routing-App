@@ -4,7 +4,33 @@ const { createSecurityContext, IdentityService } = require('@sap/xssec')
 
 const LOG = cds.log('mcp')
 
-const isProduction = (cds.env.profiles || []).includes('production')
+function isProduction() {
+  return (cds.env.profiles || []).includes('production')
+}
+
+/**
+ * Whether global auth is disabled via env (e.g. CDS_MCP_REQUIRE_AUTH=false).
+ * Lazily reads cds.env.mcp so tests that swap cds.env.mcp are honoured.
+ * Mirrors isGlobalAuthRequired() in routes.js without creating a circular require.
+ */
+function isGlobalAuthRequired() {
+  const mcp = (cds.env && cds.env.mcp) || {}
+  // isEnabled inline to avoid import cycle
+  const isEnabled = (v, fallback) => {
+    if (v == null) return fallback
+    if (typeof v === 'boolean') return v
+    const s = String(v).trim().toLowerCase()
+    if (s === '') return fallback
+    return !['false', '0', 'no', 'off'].includes(s)
+  }
+  if (mcp.requireAuth != null) return isEnabled(mcp.requireAuth, true)
+  if (mcp.require_auth != null) return isEnabled(mcp.require_auth, true)
+  if (mcp.allowAnonymous != null) return !isEnabled(mcp.allowAnonymous, false)
+  if (mcp.allow_anonymous != null) return !isEnabled(mcp.allow_anonymous, false)
+  if (mcp.skipAuth != null) return !isEnabled(mcp.skipAuth, false)
+  if (mcp.skip_auth != null) return !isEnabled(mcp.skip_auth, false)
+  return true
+}
 
 let _identityService // lazily created, cached IAS validator
 
@@ -62,10 +88,23 @@ function principalFromToken(token) {
  *   mock principal is derived from the `x-dev-email` header.
  */
 async function authenticate(req, res, next) {
+  // Global env toggle: CDS_MCP_REQUIRE_AUTH=false disables all checks (for Basic-auth destinations).
+  // Per-route toggle is handled in mcp-router.js by not mounting this middleware at all;
+  // this is the fallback for any route that still hits the guard.
+  if (!isGlobalAuthRequired()) {
+    req.jwt = undefined
+    req.principal = { email: 'anonymous', sub: 'anonymous', issuer: 'anonymous' }
+    LOG.warn('auth disabled via CDS_MCP_REQUIRE_AUTH — anonymous access', {
+      correlationId: req.correlationId,
+      path: req.path || req.url,
+    })
+    return next()
+  }
+
   const token = bearerToken(req)
 
   if (!token) {
-    if (isProduction) return unauthorized(res, req, 'missing_bearer_token')
+    if (isProduction()) return unauthorized(res, req, 'missing_bearer_token')
     const email = req.headers['x-dev-email'] || 'dev.user@example.com'
     req.jwt = undefined
     req.principal = { email, sub: 'dev', issuer: 'local-dev' }
@@ -78,7 +117,7 @@ async function authenticate(req, res, next) {
 
   const ias = identityService()
   if (!ias) {
-    if (isProduction) return unauthorized(res, req, 'no_identity_binding')
+    if (isProduction()) return unauthorized(res, req, 'no_identity_binding')
     // Dev with a token but no binding: accept unverified so routing is testable.
     req.jwt = token
     req.principal = principalFromToken({ payload: decodePayload(token) })

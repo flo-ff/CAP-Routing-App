@@ -176,8 +176,10 @@ test('describeRoutes returns a non-sensitive view of the route table', () => {
       locationId: 'PM4-Sydney',
       methods: 'all',
       peek: true,
+      requireAuth: true,
     },
   ])
+  assert.deepEqual(config.auth, { requireAuth: true })
 })
 
 test('getEndpoints exposes /health and /config by default', () => {

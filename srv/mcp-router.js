@@ -2,7 +2,7 @@ const cds = require('@sap/cds')
 const express = require('express')
 const { authenticate } = require('./lib/auth')
 const { proxyToBackend } = require('./lib/proxy')
-const { resolveRoutes } = require('./lib/routes')
+const { resolveRoutes, isRouteAuthRequired } = require('./lib/routes')
 
 const LOG = cds.log('mcp')
 
@@ -85,7 +85,14 @@ module.exports = function mountMcpRouter(app) {
 
   for (const route of routes) {
     const router = express.Router()
-    router.use(authenticate)
+    if (isRouteAuthRequired(route)) {
+      router.use(authenticate)
+    } else {
+      LOG.warn('auth disabled for route — anonymous access (Basic auth destination expected)', {
+        path: route.path,
+        destination: route.destination,
+      })
+    }
 
     const handler = (req, res) => {
       req.mcpRoute = route
