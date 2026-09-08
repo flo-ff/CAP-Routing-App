@@ -14,7 +14,6 @@ function isProduction() {
  * Mirrors isGlobalAuthRequired() in routes.js without creating a circular require.
  */
 function isGlobalAuthRequired() {
-  const mcp = (cds.env && cds.env.mcp) || {}
   // isEnabled inline to avoid import cycle
   const isEnabled = (v, fallback) => {
     if (v == null) return fallback
@@ -23,12 +22,27 @@ function isGlobalAuthRequired() {
     if (s === '') return fallback
     return !['false', '0', 'no', 'off'].includes(s)
   }
+  // 1) Direct process.env (covers CDS_MCP_REQUIRE_AUTH -> nested mcp.require.auth)
+  if (process.env.CDS_MCP_REQUIRE_AUTH != null) return isEnabled(process.env.CDS_MCP_REQUIRE_AUTH, true)
+  if (process.env.CDS_MCP_REQUIREAUTH != null) return isEnabled(process.env.CDS_MCP_REQUIREAUTH, true)
+  if (process.env.CDS_MCP_ALLOW_ANONYMOUS != null) return !isEnabled(process.env.CDS_MCP_ALLOW_ANONYMOUS, false)
+  if (process.env.CDS_MCP_ALLOWANONYMOUS != null) return !isEnabled(process.env.CDS_MCP_ALLOWANONYMOUS, false)
+  if (process.env.CDS_MCP_SKIP_AUTH != null) return !isEnabled(process.env.CDS_MCP_SKIP_AUTH, false)
+  if (process.env.CDS_MCP_SKIPAUTH != null) return !isEnabled(process.env.CDS_MCP_SKIPAUTH, false)
+
+  const mcp = (cds.env && cds.env.mcp) || {}
   if (mcp.requireAuth != null) return isEnabled(mcp.requireAuth, true)
+  if (mcp.requireauth != null) return isEnabled(mcp.requireauth, true)
   if (mcp.require_auth != null) return isEnabled(mcp.require_auth, true)
+  if (mcp.require && typeof mcp.require === 'object' && mcp.require.auth != null) return isEnabled(mcp.require.auth, true)
   if (mcp.allowAnonymous != null) return !isEnabled(mcp.allowAnonymous, false)
+  if (mcp.allowanonymous != null) return !isEnabled(mcp.allowanonymous, false)
   if (mcp.allow_anonymous != null) return !isEnabled(mcp.allow_anonymous, false)
+  if (mcp.allow && typeof mcp.allow === 'object' && mcp.allow.anonymous != null) return !isEnabled(mcp.allow.anonymous, false)
   if (mcp.skipAuth != null) return !isEnabled(mcp.skipAuth, false)
+  if (mcp.skipauth != null) return !isEnabled(mcp.skipauth, false)
   if (mcp.skip_auth != null) return !isEnabled(mcp.skip_auth, false)
+  if (mcp.skip && typeof mcp.skip === 'object' && mcp.skip.auth != null) return !isEnabled(mcp.skip.auth, false)
   return true
 }
 

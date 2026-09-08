@@ -195,15 +195,35 @@ function isEnabled(value, fallback = true) {
  * or `CDS_MCP_ALLOW_ANONYMOUS=true` / `CDS_MCP_SKIP_AUTH=true` all disable auth.
  * Default: true (backward compatible).
  * String values are coerced via `isEnabled` so "false"/"0"/"no"/"off" work.
+ *
+ * NOTE: `CDS_MCP_REQUIRE_AUTH` (with underscore) is split by CDS into
+ * `cds.env.mcp.require.auth` (nested), while `CDS_MCP_REQUIREAUTH` maps to
+ * `cds.env.mcp.requireauth`. We therefore check `process.env` directly plus
+ * all cds.env variants to be robust against the CDS env mapping.
  */
 function isGlobalAuthRequired() {
+  // 1) Direct process.env (most reliable, covers both underscore variants)
+  if (process.env.CDS_MCP_REQUIRE_AUTH != null) return isEnabled(process.env.CDS_MCP_REQUIRE_AUTH, true)
+  if (process.env.CDS_MCP_REQUIREAUTH != null) return isEnabled(process.env.CDS_MCP_REQUIREAUTH, true)
+  if (process.env.CDS_MCP_ALLOW_ANONYMOUS != null) return !isEnabled(process.env.CDS_MCP_ALLOW_ANONYMOUS, false)
+  if (process.env.CDS_MCP_ALLOWANONYMOUS != null) return !isEnabled(process.env.CDS_MCP_ALLOWANONYMOUS, false)
+  if (process.env.CDS_MCP_SKIP_AUTH != null) return !isEnabled(process.env.CDS_MCP_SKIP_AUTH, false)
+  if (process.env.CDS_MCP_SKIPAUTH != null) return !isEnabled(process.env.CDS_MCP_SKIPAUTH, false)
+
+  // 2) cds.env variants (covers JSON / .cdsrc / package.json)
   const mcp = cds.env.mcp || {}
   if (mcp.requireAuth != null) return isEnabled(mcp.requireAuth, true)
+  if (mcp.requireauth != null) return isEnabled(mcp.requireauth, true)
   if (mcp.require_auth != null) return isEnabled(mcp.require_auth, true)
+  if (mcp.require && typeof mcp.require === 'object' && mcp.require.auth != null) return isEnabled(mcp.require.auth, true)
   if (mcp.allowAnonymous != null) return !isEnabled(mcp.allowAnonymous, false)
+  if (mcp.allowanonymous != null) return !isEnabled(mcp.allowanonymous, false)
   if (mcp.allow_anonymous != null) return !isEnabled(mcp.allow_anonymous, false)
+  if (mcp.allow && typeof mcp.allow === 'object' && mcp.allow.anonymous != null) return !isEnabled(mcp.allow.anonymous, false)
   if (mcp.skipAuth != null) return !isEnabled(mcp.skipAuth, false)
+  if (mcp.skipauth != null) return !isEnabled(mcp.skipauth, false)
   if (mcp.skip_auth != null) return !isEnabled(mcp.skip_auth, false)
+  if (mcp.skip && typeof mcp.skip === 'object' && mcp.skip.auth != null) return !isEnabled(mcp.skip.auth, false)
   return true
 }
 
