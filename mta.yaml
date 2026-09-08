@@ -63,11 +63,14 @@ resources:
             - http://localhost:8080/callback
             # Default callback used by Postman's OAuth 2.0 helper.
             - https://oauth.pstmn.io/v1/callback
+            # FIS added default bruno oauth helper
+            - https://oauth.usebruno.com/callback
             # Microsoft Copilot Studio / Power Platform custom-connector callback.
             # The ** wildcard covers the per-connector redirect path, so new
             # connectors keep working without re-editing IAS.
             - https://global.consent.azure-apim.net/redirect/**
           grant-types:
+            - client_credentials
             - authorization_code
             - refresh_token
 

@@ -112,17 +112,77 @@ async function proxyToBackend(req, res) {
   const cid = req.correlationId
   const mcpMethod = req.parsedMcpMethod // set by the router when a body is buffered (optional)
 
+  // IAS client_credentials tokens carry no user (no email/user_uuid) and must not
+  // be used as subscriber-JWT for OnPremise BasicAuth — they trigger
+  // `serviceToken('destination'/'connectivity', {jwt: CC_JWT})` with a mismatched
+  // tenant (zid/app_tid) -> "Failed to fetch subscriber service token" +
+  // "Failed to add proxy authorization header - client credentials grant failed!".
+  // For non-user auth (BasicAuth / OAuth2ClientCredentials) use the provider
+  // token (no JWT) instead.
+  function isClientCredentialsToken(jwt) {
+    if (!jwt || typeof jwt !== 'string') return false
+    try {
+      const payload = JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8'))
+      return payload.grant_type === 'client_credentials' || (!payload.email && !payload.mail && !payload.user_uuid && !payload.user_name && !!payload.client_id)
+    } catch {
+      return false
+    }
+  }
+
+  const isCC = isClientCredentialsToken(req.jwt)
+  if (isCC) {
+    LOG.info('client_credentials grant detected — will use provider destination flow (no subscriber JWT)', { correlationId: cid })
+  }
+
   let destination
   try {
-    destination = await getDestination({ destinationName, jwt: req.jwt })
+    // For CC + BasicAuth the subscriber flow always fails; try provider flow first.
+    // For user flows keep the JWT so PrincipalPropagation / user-dependent destinations work.
+    const jwtForDestination = isCC ? undefined : req.jwt
+    destination = await getDestination({ destinationName, jwt: jwtForDestination })
     if (!destination) throw new Error(`Destination '${destinationName}' not found`)
   } catch (err) {
-    LOG.error('destination resolution failed', {
+    const msg = err.message || ''
+    const isProxyAuthFailure = msg.includes('Failed to add proxy authorization header') || msg.includes('Failed to fetch subscriber service token')
+    // Fallback: if we tried with a user JWT and got a proxy-auth failure due to CC, retry as provider flow.
+    if (!isCC && isProxyAuthFailure && req.jwt) {
+      LOG.warn('destination resolution with subscriber JWT failed, retrying as provider flow', { correlationId: cid, error: msg })
+      try {
+        destination = await getDestination({ destinationName })
+        if (!destination) throw new Error(`Destination '${destinationName}' not found`)
+        LOG.info('provider-flow retry succeeded', { correlationId: cid })
+      } catch (retryErr) {
+        LOG.error('destination resolution failed', {
+          correlationId: cid,
+          destination: destinationName,
+          error: retryErr.message,
+          cause: err.stack,
+        })
+        return sendError(res, 502, 'destination_error', retryErr.message)
+      }
+    } else {
+      LOG.error('destination resolution failed', {
+        correlationId: cid,
+        destination: destinationName,
+        error: err.message,
+        stack: err.stack,
+        cause: err.cause?.message,
+      })
+      return sendError(res, 502, 'destination_error', err.message)
+    }
+  }
+
+  if (isCC && destination.authentication === 'PrincipalPropagation') {
+    LOG.error('client_credentials not compatible with PrincipalPropagation destination', {
       correlationId: cid,
       destination: destinationName,
-      error: err.message,
     })
-    return sendError(res, 502, 'destination_error', err.message)
+    return sendError(
+      res,
+      502,
+      'destination_error',
+      `Destination '${destinationName}' uses PrincipalPropagation which requires a user token (authorization_code). Use a BasicAuthentication/OAuth2ClientCredentials destination for client_credentials.`,
+    )
   }
 
   let destinationHeaders

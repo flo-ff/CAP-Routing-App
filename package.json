@@ -48,9 +48,9 @@
       }
     },
     "mcp": {
-      "destination": "pm4-bp-ssl",
-      "backendPath": "/sap/zmcp2/ZMCPX",
-      "locationId": "PM4-Sydney",
+      "destination": "ERP_Backend_CAP_BA",
+      "backendPath": "/sap/bc/zmcp",
+      "locationId": "qby.tddlandscape",
       "timeout": 120000,
       "exposeHealth": true,
       "exposeConfig": true,
